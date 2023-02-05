@@ -1,0 +1,56 @@
+name: Build and Deploy
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ghpages
+jobs:
+  Build:
+    runs-on: ubuntu-latest
+    steps:
+        - name: Download prod build
+          id: prevbuild
+          uses: dawidd6/action-download-artifact@master
+          with:
+            workflow: build.yaml
+            branch: ghpages
+            name: github-pages
+            path: site
+            if_no_artifact_found: warn
+        - name: Extract previous build
+          if: steps.prevbuild.outputs.found_artifact != 'false'
+          run: |
+            cd site
+            tar -xf artifact.tar && rm artifact.tar
+        - name: git clone big_imgs
+          uses: actions/checkout@v3
+          with:
+            ref: ghpages
+            path: big_imgs
+        - name: git clone imgs
+          uses: actions/checkout@v3
+          with:
+            repository: buddhist-uni/imgs
+            path: imgs
+        - name: Generate images
+          run: |
+            cd big_imgs
+            python build.py -r --verbose -d ../site
+        - name: Upload Build as Artifact
+          uses: actions/upload-pages-artifact@main
+          with:
+            path: site
+            retention-days: 90
+  Deploy:
+    runs-on: ubuntu-latest
+    needs: Build
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@main
