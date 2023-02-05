@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from filecmp import cmp as filecmp
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import subprocess
+from shutil import copy2
 
 def command_line_args():
     parser = argparse.ArgumentParser(
@@ -65,7 +66,7 @@ def copy_file(frompath, topath):
           lambda:topath.unlink(),
           f"rm {str(topath)}")
     take_action(
-      lambda:topath.hardlink_to(frompath),
+      lambda:copy2(frompath,topath),
       f"cp {str(frompath)} {str(topath)}")
 
 def remove_untouched_files():
@@ -160,10 +161,12 @@ class BaseImageDeriver:
                 ))
             for future in as_completed(futures):
                 result = future.result()
-                print(f"-{result.args}")
+                print(f"-{result.args}", flush=True)
                 if self.verbose or result.returncode:
-                    # imagemagick always writes to stderr
+                    sys.stdout.buffer.write(result.stdout)
+                    # imagemagick often writes to stderr too
                     sys.stdout.buffer.write(result.stderr)
+                    sys.stdout.buffer.flush()
                 if result.returncode:
                     raise subprocess.CalledProcessError(result.returncode, result.args)
           self.metadata_path.write_text(json.dumps({'version': self.VERSION}))
