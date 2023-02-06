@@ -16,6 +16,9 @@ def command_line_args():
     parser.add_argument("-d", "--dest",
       help="The folder you want everything to end up in",
       type=Path, default=Path('../site'))
+    parser.add_argument("-c", "--cores",
+      help="Number of worker threads to use",
+      default=os.cpu_count(), type=int)
     parser.add_argument("-r", "--remove-old",
       help="Delete unnecessary files in DEST?",
       default=False, action='store_true')
@@ -182,12 +185,7 @@ class BaseImageDeriver:
                     print(f"-{cmd}")
                     done += 1
         else:
-          cpu_count = os.cpu_count()
-          if args.verbose:
-            print(f"Found you're running on a {cpu_count}-core machine")
-          if cpu_count == 1:
-            raise RuntimeError("This script is not written for single-core machines")
-          with ThreadPoolExecutor(max_workers=max(3,cpu_count)) as executor:
+          with ThreadPoolExecutor(max_workers=args.cores) as executor:
             futures = []
             for file in self.getSourceFiles():
               cmd = self.magickCmdForFile(file)
@@ -254,9 +252,9 @@ class BannerImageDeriver(BaseImageDeriver):
     MAGICK_OPTS=BaseImageDeriver.MAGICK_OPTS+" -write mpr:orig"
     SRC='banners'
     DST='banners'
-    VERSION = 1
+    VERSION = 2
     TARGET_WIDTHS = [400, 594, 881, 1308, 1940, 2880, 4274, 6343]
-    DENSITY = 1.2
+    DENSITY = 1.5
     # if big_image_width <= target*MIN_DPP_FOR_2x, only 1x available
     # and all larger "target_widths" are skipped
     MIN_DPP_FOR_2X = 1.75
