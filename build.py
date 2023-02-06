@@ -1,12 +1,11 @@
 #!/bin/python3
 import os, argparse, sys, json
 from pathlib import Path
-from itertools import chain
 from dataclasses import dataclass
 from filecmp import cmp as filecmp
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import subprocess
-from shutil import copy2
+from shutil import copy2, rmtree
 
 def command_line_args():
     parser = argparse.ArgumentParser(
@@ -47,8 +46,8 @@ def prepare_dest(dest, remove_old):
     else:
         take_action(lambda:args.dest.mkdir(), f"mkdir {str(args.dest)}")
 
-"""Returns True if the file was in `files_to_rm`"""
 def touch_file(path):
+    """Returns True if the file was in `files_to_rm`"""
     try:
         files_to_rm.remove(Path(path).resolve())
         return True
@@ -76,7 +75,7 @@ def remove_untouched_files():
 
 def rm_file(file):
   if file.is_dir():
-    take_action(lambda:file.rmdir(), f"rm -rf {str(file)}")
+    take_action(lambda:rmtree(file), f"rm -rf {str(file)}")
   else:
     take_action(lambda:file.unlink(), f"rm {str(file)}")
 
@@ -84,6 +83,40 @@ def rm_file(file):
 class ImageVariant:
     command: str
     outpath: str
+
+def magick_resize(width: int, height: int, target_width: int, target_height: int, center_x, center_y):
+    """
+    Returns an imagemagick command for resizing an image buffer
+    from `width` x `height` to `target_width` x `target_height`
+    focusing on the given center point
+    
+    Params:
+    - widths and heights are in pixels and must be integers
+    - center is in percentage points (i.e. 50 is the middle)
+    
+    Returns:
+    A string giving the -resize command without any additional IO ops
+    """
+    target_ratio = float(target_width) / float(target_height)
+    actual_ratio = float(width) / float(height)
+    crop_width = width
+    crop_height = height
+    crop_x = 0
+    crop_y = 0
+    if target_ratio > actual_ratio: # Wider target => trim top/bottom
+        crop_height = round(height * actual_ratio / target_ratio)
+        delta_h = height - crop_height
+        crop_y = round(delta_h * center_y / 100.0)
+    if target_ratio < actual_ratio: # Taller target => trim sides
+        crop_width = round(width * target_ratio / actual_ratio)
+        delta_w = width - crop_width
+        crop_x = round(delta_w * center_x / 100.0)
+    ret = ""
+    if crop_height != height or crop_width != width:
+        ret = f"-crop '{crop_width}x{crop_height}+{crop_x}+{crop_y}' +repage "
+    if target_height != crop_height or target_width != crop_width:
+        ret += f"-resize '{target_width}x{target_height}>'"
+    return ret
 
 class BaseImageDeriver:
     MAGICK_OPTS = "-verbose -strip -define webp:method=4 -define webp:pass=5 -define webp:target-psnr=49"
@@ -113,15 +146,17 @@ class BaseImageDeriver:
         result = subprocess.run(f"identify -ping -format '[%w,%h]' \"{str(file)}\"",
           shell=True, check=True, capture_output=True)
         width, height = json.loads(result.stdout)
-        variants = self.getVariantsForImage(file.name, width, height)
+        variants = self.getVariantsForImage(file.relative_to(self.source), width, height)
         cmd = ""
         for variant in variants:
-            touch_file(variant.outpath)
-            if self.previous_info['version'] >= self.VERSION and Path(variant.outpath).exists():
+            outpath = self.target/variant.outpath
+            touch_file(outpath)
+            if self.previous_info['version'] >= self.VERSION and outpath.exists():
                 continue
-            cmd += f" {variant.command} -write \"{variant.outpath}\""
+            cmd += f" {variant.command} -write \"{str(outpath)}\""
         if cmd == "":
             return None
+        # ImageMagick requires that the last output file _not_ get the explicit " -write " command
         return f"convert \"{str(file)}\" {self.MAGICK_OPTS}" + ' '.join(cmd.rsplit(' -write ', 1))
 
     def run(self):
@@ -147,7 +182,12 @@ class BaseImageDeriver:
                     print(f"-{cmd}")
                     done += 1
         else:
-          with ThreadPoolExecutor(max_workers=os.cpu_count()+1) as executor:
+          cpu_count = os.cpu_count()
+          if args.verbose:
+            print(f"Found you're running on a {cpu_count}-core machine")
+          if cpu_count == 1:
+            raise RuntimeError("This script is not written for single-core machines")
+          with ThreadPoolExecutor(max_workers=max(3,cpu_count)) as executor:
             futures = []
             for file in self.getSourceFiles():
               cmd = self.magickCmdForFile(file)
@@ -180,7 +220,7 @@ class ImageryCourseImageDeriver(BaseImageDeriver):
     VERSION = 1
 
     def getVariantsForImage(self, filename, width, height):
-        retname = str((self.target/filename).with_suffix('.webp'))
+        retname = str(filename.with_suffix('.webp'))
         return [
             ImageVariant("-resize '1066x1280>'", retname),
             ImageVariant("-resize 533", retname.replace('.webp', '-1x.webp')),
@@ -192,7 +232,7 @@ class BuddhismCourseImageDeriver(BaseImageDeriver):
     VERSION = 1
 
     def getVariantsForImage(self, filename, width, height):
-        retname = str((self.target/filename).with_suffix('.webp'))
+        retname = str(filename.with_suffix('.webp'))
         if height > width and height >= 1536:
           return [
             ImageVariant("-resize '1920x1920>'", retname),
@@ -210,6 +250,71 @@ class FunctionCourseImageDeriver(BuddhismCourseImageDeriver):
     DST='function'
     VERSION = 1
 
+class BannerImageDeriver(BaseImageDeriver):
+    MAGICK_OPTS=BaseImageDeriver.MAGICK_OPTS+" -write mpr:orig"
+    SRC='banners'
+    DST='banners'
+    VERSION = 1
+    TARGET_WIDTHS = [400, 594, 881, 1308, 1940, 2880, 4274, 6343]
+    DENSITY = 1.2
+    # if big_image_width <= target*MIN_DPP_FOR_2x, only 1x available
+    # and all larger "target_widths" are skipped
+    MIN_DPP_FOR_2X = 1.75
+
+    def __init__(self, root, dest, verbose=False, dry_run=False):
+        super(BannerImageDeriver, self).__init__(root, dest, verbose=verbose, dry_run=dry_run)
+        image_data_path = self.source/'image_metadata.json'
+        self.image_data = json.loads(image_data_path.read_text())
+
+    def getHeightForType(self, subfolder):
+        match subfolder:
+            case 'courses':
+                return 680
+            case 'footers':
+                return 650
+            case 'headers':
+                return 240
+            case 'navbar_headers':
+                return 200
+            case 'huge_footers':
+                return 900
+            case _:
+                raise ValueError(f"Unexpected subfolder {subfolder} in BannerImageDeriver")
+
+    def getSourceFiles(self):
+        return self.source.glob('*/*')
+
+    def getVariantsForImage(self, file, width, height):
+        subfolder = file.parts[0]
+        target_height = self.getHeightForType(subfolder)
+        center = self.image_data[file.name]['center']
+        ret = []
+        for target_width in self.TARGET_WIDTHS:
+          big = [self.DENSITY*target_width, self.DENSITY*target_height]
+          if target_width*self.MIN_DPP_FOR_2X >= width:
+            ret.append(ImageVariant(
+              "+delete mpr:orig "+magick_resize(
+                width, height,
+                round(big[0]), round(big[1]),
+                center[0], center[1]
+              ),
+              file.stem+f"-{target_width}-1x.webp"
+            ))
+            return ret
+          else:
+            ret.append(ImageVariant(
+              ("+delete mpr:orig " if ret else '')+magick_resize(
+              width, height,
+              round(2*big[0]), round(2*big[1]),
+              center[0], center[1]),
+              file.stem+f"-{target_width}-2x.webp"
+            ))
+            ret.append(ImageVariant(
+              f"-resize '{round(big[0])}x{round(big[1])}>'",
+              file.stem+f"-{target_width}-1x.webp"
+            ))
+        return ret
+
 if __name__ == "__main__":
     global args 
     args = command_line_args()
@@ -218,7 +323,7 @@ if __name__ == "__main__":
         print(f"Running with args: {args}\n")
     prepare_dest(args.dest, args.remove_old)
     copy_file(args.repo_dir/'index.html', args.dest/'index.html')
-    for deriverclass in [BuddhismCourseImageDeriver, FunctionCourseImageDeriver, ImageryCourseImageDeriver]:
+    for deriverclass in [BuddhismCourseImageDeriver, FunctionCourseImageDeriver, ImageryCourseImageDeriver, BannerImageDeriver]:
         deriver = deriverclass(
           args.repo_dir, args.dest,
           verbose=args.verbose, dry_run=args.dry_run)
