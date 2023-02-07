@@ -138,6 +138,7 @@ class BaseImageDeriver:
             self.previous_info = json.loads(self.metadata_path.read_text())
         except FileNotFoundError:
             self.previous_info = {'version': 0}
+        self.metadata = {'version': self.VERSION}
 
     def getSourceFiles(self):
         return self.source.iterdir()
@@ -207,7 +208,7 @@ class BaseImageDeriver:
                     sys.stdout.buffer.flush()
                 if result.returncode:
                     raise subprocess.CalledProcessError(result.returncode, result.args)
-          self.metadata_path.write_text(json.dumps({'version': self.VERSION}))
+          self.metadata_path.write_text(json.dumps(self.metadata))
         if done == 0:
             print(f"Nothing to do :_)")
         print(f"===Finished {self.__class__.__name__}===\n")
@@ -262,7 +263,7 @@ class BannerImageDeriver(BaseImageDeriver):
     def __init__(self, root, dest, verbose=False, dry_run=False):
         super(BannerImageDeriver, self).__init__(root, dest, verbose=verbose, dry_run=dry_run)
         image_data_path = self.source/'image_metadata.json'
-        self.image_data = json.loads(image_data_path.read_text())
+        self.metadata['image_data'] = json.loads(image_data_path.read_text())
 
     def getHeightForType(self, subfolder):
         match subfolder:
@@ -285,7 +286,7 @@ class BannerImageDeriver(BaseImageDeriver):
     def getVariantsForImage(self, file, width, height):
         subfolder = file.parts[0]
         target_height = self.getHeightForType(subfolder)
-        center = self.image_data[file.name]['center']
+        center = self.metadata['image_data'][file.name]['center']
         ret = []
         for target_width in self.TARGET_WIDTHS:
           big = [self.DENSITY*target_width, self.DENSITY*target_height]
