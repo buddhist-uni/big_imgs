@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - ghpages
+      - main
 jobs:
   Build:
     runs-on: ubuntu-latest
@@ -13,7 +13,7 @@ jobs:
           uses: dawidd6/action-download-artifact@master
           with:
             workflow: build.yaml
-            branch: ghpages
+            branch: main
             name: github-pages
             path: site
             if_no_artifact_found: warn
@@ -25,7 +25,6 @@ jobs:
         - name: git clone big_imgs
           uses: actions/checkout@v3
           with:
-            ref: ghpages
             path: big_imgs
         - name: git clone imgs
           uses: actions/checkout@v3

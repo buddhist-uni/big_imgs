@@ -289,7 +289,7 @@ class BannerImageDeriver(BaseImageDeriver):
         ret = []
         for target_width in self.TARGET_WIDTHS:
           big = [self.DENSITY*target_width, self.DENSITY*target_height]
-          if target_width*self.MIN_DPP_FOR_2X >= width:
+          if target_width*self.MIN_DPP_FOR_2X > width:
             ret.append(ImageVariant(
               "+delete mpr:orig "+magick_resize(
                 width, height,
