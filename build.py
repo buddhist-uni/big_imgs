@@ -146,16 +146,20 @@ class BaseImageDeriver:
     def getVariantsForImage(self, filename, width, height):
         raise NotImplementedError
 
+    def versionMatches(self, inpath, outpath):
+        return self.previous_info['version'] >= self.VERSION
+
     def magickCmdForFile(self, file):
         result = subprocess.run(f"identify -ping -format '[%w,%h]' \"{str(file)}\"",
           shell=True, check=True, capture_output=True)
         width, height = json.loads(result.stdout)
-        variants = self.getVariantsForImage(file.relative_to(self.source), width, height)
+        relfile = file.relative_to(self.source)
+        variants = self.getVariantsForImage(relfile, width, height)
         cmd = ""
         for variant in variants:
             outpath = self.target/variant.outpath
             touch_file(outpath)
-            if self.previous_info['version'] >= self.VERSION and outpath.exists():
+            if outpath.exists() and self.versionMatches(relfile, outpath):
                 continue
             cmd += f" {variant.command} -write \"{str(outpath)}\""
         if cmd == "":
@@ -208,7 +212,8 @@ class BaseImageDeriver:
                     sys.stdout.buffer.flush()
                 if result.returncode:
                     raise subprocess.CalledProcessError(result.returncode, result.args)
-          self.metadata_path.write_text(json.dumps(self.metadata))
+          take_action(lambda: self.metadata_path.write_text(json.dumps(self.metadata)),
+            f"Dumping {__class__.__name__}'s metadata to a json file...")
         if done == 0:
             print(f"Nothing to do :_)")
         print(f"===Finished {self.__class__.__name__}===\n")
@@ -264,6 +269,9 @@ class BannerImageDeriver(BaseImageDeriver):
         super(BannerImageDeriver, self).__init__(root, dest, verbose=verbose, dry_run=dry_run)
         image_data_path = self.source/'image_metadata.json'
         self.metadata['image_data'] = json.loads(image_data_path.read_text())
+
+    def versionMatches(self, inpath, outpath):
+        return self.previous_info['version'] >= self.VERSION and self.previous_info['image_data'][inpath.name] == self.metadata['image_data'][inpath.name]
 
     def getHeightForType(self, subfolder):
         match subfolder:
