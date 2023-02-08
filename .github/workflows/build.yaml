@@ -6,6 +6,12 @@ on:
       - main
 jobs:
   Build:
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
         - name: Download prod build
@@ -40,16 +46,26 @@ jobs:
           with:
             path: site
             retention-days: 90
-  Deploy:
-    runs-on: ubuntu-latest
-    needs: Build
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@main
+        - name: Deploy to GitHub Pages
+          id: deployment
+          uses: actions/deploy-pages@main
+        - name: Invalidate CloudFlare Cache for Modified Items
+          shell: bash
+          run: |
+            purgeaurl(){
+              HTTP_RESPONSE=$(curl --silent --show-error -X POST "https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache" -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" -H "Content-Type:application/json" -w "HTTP_STATUS:%{http_code}" --data "{\"files\":[\"${1}\"]}")
+              HTTP_BODY=$(echo "${HTTP_RESPONSE}" | sed -E 's/HTTP_STATUS\:[0-9]{3}$//')
+              HTTP_STATUS=$(echo "${HTTP_RESPONSE}" | tr -d '\n' | sed -E 's/.*HTTP_STATUS:([0-9]{3})$/\1/')
+              if [ "${HTTP_STATUS}" -eq "200" ]; then
+                SUCCESS=$(echo ${HTTP_BODY} | python3 -c "import sys, json;print(json.load(sys.stdin)['success'])")
+                if [ "${SUCCESS}" = "True" ]; then
+                  echo "Purged $1"
+                else
+                  echo "::warning title=CloudFlare Cache-Bust Failure::Failed to purge $1 => ${HTTP_BODY}"
+                fi
+              else
+                echo "::warning title=CloudFlare Cache-Bust Failure::Failed to purge $1 => ($HTTP_STATUS): ${HTTP_BODY}"
+              fi
+            }
+            export -f purgeaurl
+            cat site/modified_files.txt | sed 's/^/https:\/\/buddhistuniversity.net\/big_imgs\//g' | xargs -n 1 -P 100 -I {} bash -c 'purgeaurl "{}"'

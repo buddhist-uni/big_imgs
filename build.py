@@ -139,6 +139,7 @@ class BaseImageDeriver:
         except FileNotFoundError:
             self.previous_info = {'version': 0}
         self.metadata = {'version': self.VERSION}
+        self.modified_files = []
 
     def getSourceFiles(self):
         return self.source.iterdir()
@@ -159,8 +160,10 @@ class BaseImageDeriver:
         for variant in variants:
             outpath = self.target/variant.outpath
             touch_file(outpath)
-            if outpath.exists() and self.versionMatches(relfile, outpath):
+            if outpath.exists():
+              if self.versionMatches(relfile, outpath):
                 continue
+              self.modified_files.append(outpath)
             cmd += f" {variant.command} -write \"{str(outpath)}\""
         if cmd == "":
             return None
@@ -213,7 +216,7 @@ class BaseImageDeriver:
                 if result.returncode:
                     raise subprocess.CalledProcessError(result.returncode, result.args)
           take_action(lambda: self.metadata_path.write_text(json.dumps(self.metadata)),
-            f"Dumping {__class__.__name__}'s metadata to a json file...")
+            f"Dumping {self.__class__.__name__}'s metadata to a json file...")
         if done == 0:
             print(f"Nothing to do :_)")
         print(f"===Finished {self.__class__.__name__}===\n")
@@ -322,6 +325,11 @@ class BannerImageDeriver(BaseImageDeriver):
             ))
         return ret
 
+def write_modified_file_list(modified_files):
+    dest = args.dest.resolve()
+    flist = map(lambda f: str(f.relative_to(dest)), modified_files)
+    take_action(lambda: (args.dest/'modified_files.txt').write_text('\n'.join(flist)), '> modified_files.txt')
+
 if __name__ == "__main__":
     global args 
     args = command_line_args()
@@ -330,13 +338,18 @@ if __name__ == "__main__":
         print(f"Running with args: {args}\n")
     prepare_dest(args.dest, args.remove_old)
     copy_file(args.repo_dir/'index.html', args.dest/'index.html')
+    modified_files = []
     for deriverclass in [BuddhismCourseImageDeriver, FunctionCourseImageDeriver, ImageryCourseImageDeriver, BannerImageDeriver]:
         deriver = deriverclass(
           args.repo_dir, args.dest,
           verbose=args.verbose, dry_run=args.dry_run)
         deriver.run()
+        modified_files += deriver.modified_files
     if len(files_to_rm)>0:
       if args.verbose:
         print("\nRemoving old files:")
       remove_untouched_files()
+    print(modified_files)
+    if len(modified_files)>0:
+        write_modified_file_list(modified_files)
 
