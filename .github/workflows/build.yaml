@@ -68,4 +68,8 @@ jobs:
               fi
             }
             export -f purgeaurl
-            cat site/modified_files.txt | sed 's/^/https:\/\/buddhistuniversity.net\/big_imgs\//g' | xargs -n 1 -P 100 -I {} bash -c 'purgeaurl "{}"'
+            if [ -f "site/modified_files.txt" ]; then
+              cat site/modified_files.txt | sed 's/^/https:\/\/buddhistuniversity.net\/big_imgs\//g' | xargs -P 100 -I {} bash -c 'purgeaurl "{}"'
+            else
+              echo "No modified files to purge"
+            fi

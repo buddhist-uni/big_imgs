@@ -122,7 +122,10 @@ def magick_resize(width: int, height: int, target_width: int, target_height: int
     return ret
 
 class BaseImageDeriver:
-    MAGICK_OPTS = "-verbose -strip -define webp:method=4 -define webp:pass=5 -define webp:target-psnr=49"
+    # method is 0-6 = fast-quality
+    # pass is number of passes to iteratively approach the target-psnr. Should be btw 3 and 7
+    # strip removes metadata
+    MAGICK_OPTS = "-verbose -strip -define webp:method=6 -define webp:pass=5 -define webp:target-psnr=49"
     METADATA_FILENAME = 'metadata.json'
     SRC = NotImplemented
     DST = NotImplemented
@@ -267,6 +270,7 @@ class BannerImageDeriver(BaseImageDeriver):
     # if big_image_width <= target*MIN_DPP_FOR_2x, only 1x available
     # and all larger "target_widths" are skipped
     MIN_DPP_FOR_2X = 1.75
+    # the above constants need to be kept in sync with obu/_data/banner.yml
 
     def __init__(self, root, dest, verbose=False, dry_run=False):
         super(BannerImageDeriver, self).__init__(root, dest, verbose=verbose, dry_run=dry_run)
@@ -349,6 +353,7 @@ if __name__ == "__main__":
       if args.verbose:
         print("\nRemoving old files:")
       remove_untouched_files()
+    print("\nModified:")
     print(modified_files)
     if len(modified_files)>0:
         write_modified_file_list(modified_files)
