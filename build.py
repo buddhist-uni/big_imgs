@@ -260,6 +260,33 @@ class FunctionCourseImageDeriver(BuddhismCourseImageDeriver):
     DST='function'
     VERSION = 1
 
+class TagIllustrationImageDeriver(BaseImageDeriver):
+    SRC='../imgs/tags'
+    MAGICK_OPTS=BaseImageDeriver.MAGICK_OPTS+" -write mpr:orig"
+    DST='tags'
+    VERSION = 1
+
+    def __init__(self, root, dest, verbose=False, dry_run=False):
+        super(TagIllustrationImageDeriver, self).__init__(root, dest, verbose=verbose, dry_run=dry_run)
+        image_data_path = self.source/'image_metadata.json'
+        self.metadata['image_data'] = json.loads(image_data_path.read_text())
+
+    def getSourceFiles(self):
+        return self.source.glob('*/*')
+
+    def getVariantsForImage(self, file, width, height):
+        crop = self.metadata['image_data'][file.name]['center']
+        crop[0] = round((width-448)*crop[0]/100.0)
+        crop[1] = round((height-250)*crop[1]/100.0)
+        return [
+            ImageVariant("-resize '1840x1250>'", file.stem+'.webp'),
+            ImageVariant("-resize '920x625>'", file.stem+'-1x.webp'),
+            ImageVariant(
+                f"+delete mpr:orig -crop '448x250+{crop[0]}+{crop[1]}'",
+                file.stem+'-preview.webp'
+            ),
+        ]
+
 class BannerImageDeriver(BaseImageDeriver):
     MAGICK_OPTS=BaseImageDeriver.MAGICK_OPTS+" -write mpr:orig"
     SRC='banners'
@@ -343,7 +370,7 @@ if __name__ == "__main__":
     prepare_dest(args.dest, args.remove_old)
     copy_file(args.repo_dir/'index.html', args.dest/'index.html')
     modified_files = []
-    for deriverclass in [BuddhismCourseImageDeriver, FunctionCourseImageDeriver, ImageryCourseImageDeriver, BannerImageDeriver]:
+    for deriverclass in [BuddhismCourseImageDeriver, FunctionCourseImageDeriver, ImageryCourseImageDeriver, TagIllustrationImageDeriver, BannerImageDeriver]:
         deriver = deriverclass(
           args.repo_dir, args.dest,
           verbose=args.verbose, dry_run=args.dry_run)
