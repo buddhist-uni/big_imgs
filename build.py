@@ -274,6 +274,9 @@ class TagIllustrationImageDeriver(BaseImageDeriver):
     def getSourceFiles(self):
         return self.source.glob('*/*')
 
+    def versionMatches(self, inpath, outpath):
+        return self.previous_info['version'] >= self.VERSION and self.previous_info['image_data'][inpath.name] == self.metadata['image_data'][inpath.name]
+
     def getVariantsForImage(self, file, width, height):
         crop = self.metadata['image_data'][file.name]['center']
         crop[0] = round((width-448)*crop[0]/100.0)
