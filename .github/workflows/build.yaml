@@ -40,7 +40,7 @@ jobs:
         - name: Generate images
           run: |
             cd big_imgs
-            python build.py -r --verbose -d ../site -c 3
+            python build.py --remove-old --verbose --dest ../site --cores 3
         - name: Upload Build as Artifact
           uses: actions/upload-pages-artifact@main
           with:
