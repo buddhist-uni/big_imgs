@@ -29,11 +29,11 @@ jobs:
             cd site
             tar -xf artifact.tar && rm artifact.tar
         - name: git clone big_imgs
-          uses: actions/checkout@v3
+          uses: actions/checkout@v4
           with:
             path: big_imgs
         - name: git clone imgs
-          uses: actions/checkout@v3
+          uses: actions/checkout@v4
           with:
             repository: buddhist-uni/imgs
             path: imgs
